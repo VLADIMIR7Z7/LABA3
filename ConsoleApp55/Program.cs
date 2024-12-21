@@ -1,47 +1,40 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.IO;
 
 namespace AutoChessConsole
 {
-    // Интерфейс для коллекции юнитов
-    public interface IUnitCollection
-    {
-        void Add(Unit unit);
-        bool Contains(Unit unit);
-        List<Unit> GetAliveUnits();
-    }
-
     // Реализация коллекции юнитов
-    public class UnitCollection : IUnitCollection
+    public class UnitCollection
     {
-        private List<Unit> units;
+        public List<Unit> Units { get; set; }
 
         public UnitCollection()
         {
-            units = new List<Unit>();
+            Units = new List<Unit>();
         }
 
         public void Add(Unit unit)
         {
-            units.Add(unit);
+            Units.Add(unit);
         }
 
         public bool Contains(Unit unit)
         {
-            return units.Contains(unit);
+            return Units.Contains(unit);
         }
 
         public List<Unit> GetAliveUnits()
         {
-            return units.FindAll(unit => unit.IsAlive);
+            return Units.FindAll(unit => unit.IsAlive);
         }
     }
 
     [Serializable]
     public class GameState
     {
-        public IUnitCollection PlayerUnits { get; private set; }
-        public IUnitCollection EnemyUnits { get; private set; }
+        public UnitCollection PlayerUnits { get; private set; }
+        public UnitCollection EnemyUnits { get; private set; }
         public int PlayerMoney { get; private set; }
 
         public GameState()
@@ -62,19 +55,76 @@ namespace AutoChessConsole
                 throw new InvalidOperationException("Недостаточно денег.");
             }
         }
+
+        public void ResetMoney()
+        {
+            PlayerMoney = 250; // Сброс денег
+        }
+
+        public void SaveGameState()
+        {
+            using (StreamWriter writer = new StreamWriter("gamestate.txt"))
+            {
+                writer.WriteLine(PlayerMoney);
+                writer.WriteLine(PlayerUnits.Units.Count);
+                foreach (var unit in PlayerUnits.Units)
+                {
+                    writer.WriteLine($"{unit.Name},{unit.Health},{unit.Damage},{unit.IsAlive}");
+                }
+            }
+        }
+
+        public static GameState LoadGameState()
+        {
+            GameState gameState = new GameState();
+            if (File.Exists("gamestate.txt"))
+            {
+                using (StreamReader reader = new StreamReader("gamestate.txt"))
+                {
+                    gameState.PlayerMoney = int.Parse(reader.ReadLine());
+                    int playerUnitCount = int.Parse(reader.ReadLine());
+                    for (int i = 0; i < playerUnitCount; i++)
+                    {
+                        var line = reader.ReadLine();
+                        var parts = line.Split(',');
+                        var unit = new Unit
+                        {
+                            Name = parts[0],
+                            Health = int.Parse(parts[1]),
+                            Damage = int.Parse(parts[2]),
+                            IsAlive = bool.Parse(parts[3])
+                        };
+                        gameState.PlayerUnits.Add(unit);
+                    }
+                }
+            }
+            return gameState; // Возвращаем загруженное состояние игры
+        }
+
+        public void StartOver()
+        {
+            if (File.Exists("gamestate.txt"))
+            {
+                File.Delete("gamestate.txt");
+                Console.WriteLine("Старое сохранение удалено. Начинаем новую игру.");
+            }
+            PlayerUnits = new UnitCollection();
+            EnemyUnits = new UnitCollection();
+            ResetMoney(); // Сброс денег
+        }
     }
 
     [Serializable]
     public class Unit
     {
-        public string Name { get; set; } = string.Empty; // Инициализация по умолчанию
+        public string Name { get; set; } = string.Empty;
         public int Health { get; set; }
         public int Damage { get; set; }
         public bool IsAlive { get; set; }
 
         public virtual void Attack(Unit target)
         {
-            if (IsAlive && target != null) // Проверка на null
+            if (IsAlive && target != null)
             {
                 target.TakeDamage(Damage);
                 Console.WriteLine($"{Name} атакует {target.Name} на {Damage} урона!");
@@ -89,23 +139,6 @@ namespace AutoChessConsole
                 IsAlive = false;
                 Console.WriteLine($"{Name} погиб.");
             }
-        }
-
-        public override string ToString()
-        {
-            return $"{Name},{Health},{Damage},{IsAlive}";
-        }
-
-        public static Unit FromString(string data)
-        {
-            var parts = data.Split(',');
-            return new Unit
-            {
-                Name = parts[0],
-                Health = int.Parse(parts[1]),
-                Damage = int.Parse(parts[2]),
-                IsAlive = bool.Parse(parts[3])
-            };
         }
     }
 
@@ -122,7 +155,7 @@ namespace AutoChessConsole
 
         public override void Attack(Unit target)
         {
-            if (IsAlive && target != null) // Проверка на null
+            if (IsAlive && target != null)
             {
                 target.TakeDamage(Damage);
                 Console.WriteLine($"{Name} стреляет шаром в {target.Name} на {Damage} урона!");
@@ -134,14 +167,15 @@ namespace AutoChessConsole
     {
         private const int HeroCost = 50;
         private GameState gameState;
-        private List<Unit> availableHeroes = new List<Unit>(); // Инициализация пустым списком
+        private List<Unit> availableHeroes = new List<Unit>();
 
         public GameManager()
         {
-            gameState = new GameState();
+            gameState = GameState.LoadGameState();
             InitializeAvailableHeroes();
             InitializeEnemyTeam();
         }
+
         private void InitializeAvailableHeroes()
         {
             availableHeroes.Add(new Unit { Name = "Воин 1", Health = 100, Damage = 20, IsAlive = true });
@@ -163,7 +197,8 @@ namespace AutoChessConsole
 
         public void SelectPlayerTeam()
         {
-            Console.WriteLine("Выберите героев для своей команды (введите номера героев, разделенные запятыми, или 'Старт' для начала боя):");
+            Console.WriteLine("Выберите героев для своей команды (введите номера героев, разделенные запятыми, или 'старт' для начала боя):");
+            Console.WriteLine("Введите 'монеты' для того что бы вернуть изначальное кол-во :");
             while (true)
             {
                 for (int i = 0; i < availableHeroes.Count; i++)
@@ -174,10 +209,18 @@ namespace AutoChessConsole
                 Console.WriteLine($"У вас {gameState.PlayerMoney} монет. Выбор героя стоит {HeroCost} монет.");
                 Console.Write("Ваш выбор: ");
                 string input = Console.ReadLine();
+                if (input.ToLower() == "монеты")
+                {
+                    gameState.ResetMoney(); // Сброс денег до 250
+                    gameState.SaveGameState(); // Сохраняем состояние игры после сброса
+                    Console.WriteLine("Количество монет сброшено до 250.");
+                    continue;
+                }
                 if (input.ToLower() == "старт")
                 {
                     if (gameState.PlayerUnits.GetAliveUnits().Count > 0)
                     {
+                        gameState.SaveGameState(); // Сохраняем состояние перед началом боя
                         break;
                     }
                     else
@@ -200,6 +243,7 @@ namespace AutoChessConsole
                                 gameState.PlayerUnits.Add(selectedHero);
                                 gameState.DeductMoney(HeroCost);
                                 Console.WriteLine($"{selectedHero.Name} добавлен в вашу команду. У вас осталось {gameState.PlayerMoney} монет.");
+                                gameState.SaveGameState(); // Сохраняем состояние игры после выбора героя
                             }
                             catch (InvalidOperationException ex)
                             {
@@ -251,6 +295,7 @@ namespace AutoChessConsole
             {
                 Console.WriteLine("Вы проиграли.");
             }
+            gameState.SaveGameState(); // Сохраняем состояние игры после завершения боя
         }
     }
 
@@ -264,10 +309,3 @@ namespace AutoChessConsole
         }
     }
 }
-
-
-
-
-
-
-
